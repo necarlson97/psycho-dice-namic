@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Psycho-Dice-Namic: Hand Testing Results</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .container { max-width: 1400px; margin: 0 auto; background: rgba(255, 255, 255, 0.1); border-radius: 15px; padding: 30px; backdrop-filter: blur(10px); }
+        h1 { text-align: center; margin-bottom: 30px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+        .chart-container { background: rgba(255, 255, 255, 0.9); border-radius: 10px; padding: 20px; margin: 20px 0; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎲 Psycho-Dice-Namic: Special Dice Analysis</h1>
+
+        <div class="chart-container">
+            <div id="pure-performance-chart"></div>
+        </div>
+
+        <div class="chart-container">
+            <div id="performance-chart"></div>
+        </div>
+
+        <div class="chart-container">
+            <div id="net-damage-chart"></div>
+        </div>
+    </div>
+
+    <script>
+        // Pure One-Roll Performance Chart (sorted order)
+        var pureData = [{
+            x: {{ dice_names|tojson }},
+            y: {{ pure_win_rates|tojson }},
+            type: 'bar',
+            name: 'Pure Win Rate',
+            marker: { color: '#51cf66' }
+        }, {
+            x: {{ dice_names|tojson }},
+            y: {{ pure_tie_rates|tojson }},
+            type: 'bar',
+            name: 'Pure Tie Rate',
+            marker: { color: '#ffd43b' }
+        }];
+        var pureAll = [].concat({{ pure_win_rates|tojson }}, {{ pure_tie_rates|tojson }});
+        var pmin = Math.min.apply(null, pureAll);
+        var pmax = Math.max.apply(null, pureAll);
+        var plower = Math.max(0, Math.min(0.5 - 0.2, pmin - 0.05));
+        var pupper = Math.min(1, Math.max(0.5 + 0.2, pmax + 0.05));
+        var pureLayout = {
+            title: 'Pure One-Roll (stacked Win + Tie)',
+            xaxis: { title: 'Dice Type' },
+            yaxis: { title: 'Rate', range: [plower, pupper] },
+            barmode: 'stack',
+            shapes: [{ type: 'line', x0: -0.5, x1: {{ dice_names|length }} - 0.5, y0: 0.5, y1: 0.5, line: { color: '#888', width: 2, dash: 'dot' } }]
+        };
+        Plotly.newPlot('pure-performance-chart', pureData, pureLayout);
+
+        // Full Game Performance Chart (Win and Tie Rates)
+        var performanceData = [{
+            x: {{ dice_names|tojson }},
+            y: {{ win_rates|tojson }},
+            type: 'bar',
+            name: 'Win Rate',
+            marker: { color: '#ff6b6b' }
+        }, {
+            x: {{ dice_names|tojson }},
+            y: {{ tie_rates|tojson }},
+            type: 'bar',
+            name: 'Tie Rate',
+            marker: { color: '#ffa94d' }
+        }];
+        var allRates = [].concat({{ win_rates|tojson }}, {{ tie_rates|tojson }});
+        var minRate = Math.min.apply(null, allRates);
+        var maxRate = Math.max.apply(null, allRates);
+        var lower = Math.max(0, Math.min(0.5 - 0.2, minRate - 0.05));
+        var upper = Math.min(1, Math.max(0.5 + 0.2, maxRate + 0.05));
+        var performanceLayout = {
+            title: 'Full Game (stacked Win + Tie)',
+            xaxis: { title: 'Dice Type' },
+            yaxis: { title: 'Rate', range: [lower, upper] },
+            barmode: 'stack',
+            shapes: [{ type: 'line', x0: -0.5, x1: {{ dice_names|length }} - 0.5, y0: 0.5, y1: 0.5, line: { color: '#888', width: 2, dash: 'dot' } }]
+        };
+        Plotly.newPlot('performance-chart', performanceData, performanceLayout);
+
+        // Net Damage Chart
+        var netData = [{ x: {{ dice_names|tojson }}, y: {{ net_damages|tojson }}, type: 'bar', name: 'Avg Net Damage', marker: { color: '#4ecdc4' } }];
+        var netLayout = { title: 'Average Net Damage', xaxis: { title: 'Dice Type' }, yaxis: { title: 'Avg Net Damage' } };
+        Plotly.newPlot('net-damage-chart', netData, netLayout);
+    </script>
+</body>
+</html>
