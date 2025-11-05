@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bias + Emotion Testing</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f7f7fb; color: #222; }
+    .chart { background: white; border-radius: 10px; padding: 20px; margin: 20px 0; box-shadow: 0 1px 4px rgba(0,0,0,0.08); color: #222; }
+    .theme-toggle { position: fixed; top: 10px; right: 10px; z-index: 999; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+    @media print { .theme-toggle { display: none; } }
+    body.dark { background: #0b0e14; color: #eaeaea; }
+    body.dark .chart { background: rgba(0,0,0,0.8); color: #eaeaea; box-shadow: none; }
+  </style>
+  </head>
+<body>
+  <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">🌙</button>
+  <div class="chart"><div id="emotion-chart"></div></div>
+  <div class="chart"><div id="bias-chart"></div></div>
+  <div class="chart"><div id="arch-chart"></div></div>
+  <div class="chart"><div id="pair-chart"></div></div>
+  <div class="chart"><div id="loops-chart"></div></div>
+
+  <script>
+    (function(){
+      var key = 'theme';
+      var saved = localStorage.getItem(key);
+      var hour = new Date().getHours();
+      var isNight = (hour >= 21 || hour < 5);
+      if (saved === 'dark' || (!saved && (isNight || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)))) {
+        document.body.classList.add('dark');
+      }
+      document.getElementById('themeToggle').addEventListener('click', function(){
+        var d = document.body.classList.toggle('dark');
+        localStorage.setItem(key, d ? 'dark' : 'light');
+      });
+    })();
+  </script>
+    var emoNames = {{ emotion_names|tojson }};
+    var emoWin = {{ emotion_win|tojson }};
+    var emoTie = {{ emotion_tie|tojson }};
+    Plotly.newPlot('emotion-chart', [
+      {x: emoNames, y: emoWin, type: 'bar', name: 'Win', marker:{color:'#4caf50'}},
+      {x: emoNames, y: emoTie, type: 'bar', name: 'Tie', marker:{color:'#ffb74d'}}
+    ], {title: 'Emotion Average Performance (Win + Tie)', barmode:'stack'});
+
+    var biasNames = {{ bias_names|tojson }};
+    var biasWin = {{ bias_win|tojson }};
+    var biasTie = {{ bias_tie|tojson }};
+    Plotly.newPlot('bias-chart', [
+      {x: biasNames, y: biasWin, type: 'bar', name: 'Win', marker:{color:'#42a5f5'}},
+      {x: biasNames, y: biasTie, type: 'bar', name: 'Tie', marker:{color:'#64b5f6'}}
+    ], {title: 'Bias Dice Average Performance (Win + Tie)', barmode:'stack'});
+
+    var archNames = {{ arch_names|tojson }};
+    var archWin = {{ arch_win|tojson }};
+    var archTie = {{ arch_tie|tojson }};
+    Plotly.newPlot('arch-chart', [
+      {x: archNames, y: archWin, type: 'bar', name: 'Win', marker:{color:'#ab47bc'}},
+      {x: archNames, y: archTie, type: 'bar', name: 'Tie', marker:{color:'#ce93d8'}}
+    ], {title: 'Archetype Average Performance (Win + Tie)', barmode:'stack'});
+
+    var pairNames = {{ pair_names|tojson }};
+    var pairWin = {{ pair_win|tojson }};
+    var pairTie = {{ pair_tie|tojson }};
+    Plotly.newPlot('pair-chart', [
+      {x: pairNames, y: pairWin, type: 'bar', name: 'Win', marker:{color:'#26a69a'}},
+      {x: pairNames, y: pairTie, type: 'bar', name: 'Tie', marker:{color:'#80cbc4'}}
+    ], {title: 'Top 30 Pairings (Win + Tie)', barmode:'stack'});
+
+    var loopLabels = {{ loop_labels|tojson }};
+    var loopCounts = {{ loop_counts|tojson }};
+    Plotly.newPlot('loops-chart', [{x: loopLabels, y: loopCounts, type:'bar', marker:{color:'#ef5350'}}], {title: 'Loadouts Causing Infinite Loops'});
+  </script>
+</body>
+</html>
+
+
+
+

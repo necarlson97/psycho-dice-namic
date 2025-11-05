@@ -10,9 +10,15 @@
         .container { max-width: 1400px; margin: 0 auto; background: rgba(255, 255, 255, 0.1); border-radius: 15px; padding: 30px; backdrop-filter: blur(10px); }
         h1 { text-align: center; margin-bottom: 30px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
         .chart-container { background: rgba(255, 255, 255, 0.9); border-radius: 10px; padding: 20px; margin: 20px 0; color: #333; }
+        .theme-toggle { position: fixed; top: 10px; right: 10px; z-index: 999; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+        @media print { .theme-toggle { display: none; } }
+        body.dark { background: #0b0e14; color: #eaeaea; }
+        body.dark .container { background: rgba(0,0,0,0.35); }
+        body.dark .chart-container { background: rgba(0,0,0,0.8); color: #eaeaea; }
     </style>
 </head>
 <body>
+    <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">🌙</button>
     <div class="container">
         <h1>🎲 Psycho-Dice-Namic: Special Dice Analysis</h1>
 
@@ -30,6 +36,20 @@
     </div>
 
     <script>
+        (function(){
+            var key = 'theme';
+            var saved = localStorage.getItem(key);
+            var hour = new Date().getHours();
+            var isNight = (hour >= 21 || hour < 5);
+            if (saved === 'dark' || (!saved && (isNight || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)))) {
+                document.body.classList.add('dark');
+            }
+            document.getElementById('themeToggle').addEventListener('click', function(){
+                var d = document.body.classList.toggle('dark');
+                localStorage.setItem(key, d ? 'dark' : 'light');
+            });
+        })();
+    </script>
         // Pure One-Roll Performance Chart (sorted order)
         var pureData = [{
             x: {{ dice_names|tojson }},

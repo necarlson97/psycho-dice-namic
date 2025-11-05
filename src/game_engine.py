@@ -8,7 +8,8 @@ import random
 
 from dice import ComboDetector, Combo
 from archetypes import Player, Archetype
-from dice import HighMindedDice, SimpletonsDice, NostalgiaDice, PenanceDice, PhlegmaticDie, CholericDie, MelancholicDie, SanguineDie
+from emotions_runtime import EmotionContext
+from dice import HighMindedDice, GroundedDice, NostalgiaDice, PenanceDice, PhlegmaticDie, CholericDie, MelancholicDie, SanguineDie
 
 
 @dataclass
@@ -19,6 +20,14 @@ class RoundResult:
     fumbled: bool
     total_damage: int
     special_effects: Dict[str, Any]
+    initial_live_values: List[int] = None
+    insults_banked_count: int = 0
+    damage_to_opponent: int = 0
+    damage_from_opponent: int = 0
+    echo_summoned_count: int = 0
+    rolled_only_odds: bool = False
+    rolled_only_evens: bool = False
+    contained_any_one: bool = False
 
 
 @dataclass
@@ -65,12 +74,14 @@ class GameEngine:
         return live_pool, round_effects
 
     def _bank_from_live_pool(self, player: Player, archetype: Archetype, live_pool: List[Tuple[int, object]]) -> RoundResult:
-        """Greedy banking from a provided live pool with bank-time effects (HighMinded, Simpleton, Nostalgia, Temperance commit)."""
+        """Greedy banking with bank-time effects (HighMinded, Grounded, Nostalgia, Penance, Apathetic, Abyssal, humor commit)."""
         insults: List[Combo] = []
         insult_sources: List[List] = []
         special_effects: Dict[str, Any] = {"heal": 0, "damage": 0, "forgiveness_tokens": 0}
         # Build a mutable values list
         live_dice = [v for v, _ in live_pool]
+        initial_values = live_dice.copy()
+        used_abyssal = False
         # Banking loop
         while True:
             possible_combos = self.combo_detector.find_combos(live_dice)
@@ -89,20 +100,32 @@ class GameEngine:
                         live_dice.remove(die_value)
 
             # Bank-time effects
-            # Catastrophize: if any Catastrophize die banked a 6, grant bust protection
+            # Catastrophize/Aporic: if banked a 6, grant bust protection
             for dobj in used_sources:
-                if getattr(dobj, "name", "") == "Catastrophize" and getattr(dobj, "last_value", None) == 6:
+                if getattr(dobj, "name", "") in ("Catastrophize", "Aporic") and getattr(dobj, "last_value", None) == 6:
                     player.bust_protection = True
             # High-minded raise
-            from dice import HighMindedDice, SimpletonsDice, NostalgiaDice, PhlegmaticDie
+            from dice import HighMindedDice, GroundedDice, NostalgiaDice, PhlegmaticDie, PenanceDice
             if any(isinstance(d, HighMindedDice) and getattr(d, "last_value", None) == 6 for d in used_sources):
                 if len(best_combo.dice) >= 1:
                     best_combo.dice.append(best_combo.dice[-1])
                     best_combo.damage = sum(best_combo.dice)
-            # Simpleton pair to triplet
-            if len(best_combo.dice) == 2 and len(set(best_combo.dice)) == 1 and any(isinstance(d, SimpletonsDice) for d in used_sources):
-                best_combo.dice.append(best_combo.dice[0])
+            # Grounded: if pair, add echo die of 1 into insult
+            if len(best_combo.dice) == 2 and len(set(best_combo.dice)) == 1 and any(isinstance(d, GroundedDice) for d in used_sources):
+                best_combo.dice.append(1)
                 best_combo.damage = sum(best_combo.dice)
+            # Penance: if any banked at value >=4, enable double damage for this debate for this player
+            if any(isinstance(d, PenanceDice) and getattr(d, "last_value", 0) >= 4 for d in used_sources):
+                player.penance_double_active = True
+            # Apathetic: on bank, heal 2
+            if any(getattr(d, "name", "") == "Apathetic" for d in used_sources):
+                healed = player.heal(2)
+                special_effects["heal"] = special_effects.get("heal", 0) + healed
+            # Abyssal: after banking, add a copy of lowest die once per round
+            if not used_abyssal and any(getattr(d, "name", "") == "Abyssal" for d in getattr(player, "dice", [])) and best_combo.dice:
+                best_combo.dice.append(min(best_combo.dice))
+                best_combo.damage = sum(best_combo.dice)
+                used_abyssal = True
             # Nostalgia echo -> next roll only
             for i, dobj in enumerate(used_sources):
                 if isinstance(dobj, NostalgiaDice):
@@ -117,9 +140,9 @@ class GameEngine:
             if len(insults) >= 2 or len(live_dice) < 4:
                 break
 
-        # Temperance commit-time humor resolution
-        from archetypes import Temperance
-        if isinstance(archetype, Temperance) and insult_sources:
+        # Humor commit-time resolution (Temperance/Physiognomist)
+        from archetypes import Temperance, Physiognomist
+        if (isinstance(archetype, Temperance) or isinstance(archetype, Physiognomist)) and insult_sources:
             humor_sums = {"sanguine": 0, "phlegmatic": 0, "melancholic": 0, "choleric": 0}
             for combo, sources in zip(insults, insult_sources):
                 for val, dobj in zip(combo.dice, sources + [None] * (len(combo.dice) - len(sources))):
@@ -159,7 +182,20 @@ class GameEngine:
                     special_effects["opp_regret"] = special_effects.get("opp_regret", 0) + 2
 
         total_damage = sum(c.damage for c in insults)
-        return RoundResult(player_name=player.name, insults=insults, fumbled=False, total_damage=total_damage, special_effects=special_effects)
+        rr = RoundResult(
+            player_name=player.name,
+            insults=insults,
+            fumbled=False,
+            total_damage=total_damage,
+            special_effects=special_effects,
+            initial_live_values=initial_values,
+            insults_banked_count=len(insults),
+            echo_summoned_count=0,
+            rolled_only_odds=all((v % 2 == 1) for v in initial_values if isinstance(v,int) and v>0),
+            rolled_only_evens=all((v % 2 == 0) for v in initial_values if isinstance(v,int) and v>0),
+            contained_any_one=any(v==1 for v in initial_values)
+        )
+        return rr
 
     def play_round(self, player: Player, archetype: Archetype) -> RoundResult:
         """Play a single round for a player"""
@@ -181,13 +217,6 @@ class GameEngine:
                 if player.regret_tokens > 0:
                     player.take_damage(player.regret_tokens)
                     player.regret_tokens = 0
-                # Penance: if Penance die last roll >=4, double next clash incoming damage
-                try:
-                    from dice import PenanceDice
-                    if any(isinstance(d, PenanceDice) and getattr(d, "last_value", 0) >= 4 for d in player.dice):
-                        player.penance_double_next_clash = True
-                except Exception:
-                    pass
                 return RoundResult(
                     player_name=player.name,
                     insults=[],
@@ -358,10 +387,34 @@ class GameEngine:
         """Play a complete debate between two players"""
         rounds = []
 
+        # Emotion: debate start hooks
+        for emo in (getattr(player1, 'emotions', []) or []):
+            try:
+                emo.on_debate_start(EmotionContext(self, player1, player2, 0, {}))
+            except Exception:
+                pass
+        for emo in (getattr(player2, 'emotions', []) or []):
+            try:
+                emo.on_debate_start(EmotionContext(self, player2, player1, 0, {}))
+            except Exception:
+                pass
+
         for round_num in range(max_rounds):
             # Joint round: roll both, handle pilfer stealing, then bank
             pool1, effects1 = self._roll_live_pool(player1, archetype1)
             pool2, effects2 = self._roll_live_pool(player2, archetype2)
+
+            # Emotion: after roll hooks
+            for emo in (getattr(player1, 'emotions', []) or []):
+                try:
+                    emo.on_after_roll(EmotionContext(self, player1, player2, round_num, {"pool": pool1}))
+                except Exception:
+                    pass
+            for emo in (getattr(player2, 'emotions', []) or []):
+                try:
+                    emo.on_after_roll(EmotionContext(self, player2, player1, round_num, {"pool": pool2}))
+                except Exception:
+                    pass
 
             # Catastrophize immediate bust
             fumble1 = bool(effects1.get("force_fumble") and not getattr(player1, "bust_protection", False))
@@ -392,19 +445,69 @@ class GameEngine:
             if not fumble1:
                 round1 = self._bank_from_live_pool(player1, archetype1, pool1)
             else:
+                # Emotion: notify self/opponent fumble
+                for emo in (getattr(player1, 'emotions', []) or []):
+                    try:
+                        emo.on_fumble(EmotionContext(self, player1, player2, round_num, {"self_fumbled": True}))
+                    except Exception:
+                        pass
+                for emo in (getattr(player2, 'emotions', []) or []):
+                    try:
+                        emo.on_fumble(EmotionContext(self, player2, player1, round_num, {"opponent_fumbled": True}))
+                    except Exception:
+                        pass
                 # Apply regret damage on fumble now
                 if player1.regret_tokens > 0:
                     player1.take_damage(player1.regret_tokens)
                     player1.regret_tokens = 0
-                round1 = RoundResult(player_name=player1.name, insults=[], fumbled=True, total_damage=0, special_effects={})
+                round1 = RoundResult(
+                    player_name=player1.name,
+                    insults=[],
+                    fumbled=True,
+                    total_damage=0,
+                    special_effects={},
+                    initial_live_values=[],
+                    insults_banked_count=0,
+                    damage_to_opponent=0,
+                    damage_from_opponent=0,
+                    echo_summoned_count=0,
+                    rolled_only_odds=False,
+                    rolled_only_evens=False,
+                    contained_any_one=False
+                )
 
             if not fumble2:
                 round2 = self._bank_from_live_pool(player2, archetype2, pool2)
             else:
+                # Emotion: notify self/opponent fumble
+                for emo in (getattr(player2, 'emotions', []) or []):
+                    try:
+                        emo.on_fumble(EmotionContext(self, player2, player1, round_num, {"self_fumbled": True}))
+                    except Exception:
+                        pass
+                for emo in (getattr(player1, 'emotions', []) or []):
+                    try:
+                        emo.on_fumble(EmotionContext(self, player1, player2, round_num, {"opponent_fumbled": True}))
+                    except Exception:
+                        pass
                 if player2.regret_tokens > 0:
                     player2.take_damage(player2.regret_tokens)
                     player2.regret_tokens = 0
-                round2 = RoundResult(player_name=player2.name, insults=[], fumbled=True, total_damage=0, special_effects={})
+                round2 = RoundResult(
+                    player_name=player2.name,
+                    insults=[],
+                    fumbled=True,
+                    total_damage=0,
+                    special_effects={},
+                    initial_live_values=[],
+                    insults_banked_count=0,
+                    damage_to_opponent=0,
+                    damage_from_opponent=0,
+                    echo_summoned_count=0,
+                    rolled_only_odds=False,
+                    rolled_only_evens=False,
+                    contained_any_one=False
+                )
 
             rounds.extend([round1, round2])
 
@@ -423,31 +526,37 @@ class GameEngine:
             if not round1.fumbled and not round2.fumbled:
                 damage1_to_2 = self.calculate_damage(round1.insults, round2.insults)
                 damage2_to_1 = self.calculate_damage(round2.insults, round1.insults)
-                # Penance: double next clash if flagged
-                if getattr(player1, "penance_double_next_clash", False):
-                    damage2_to_1 *= 2
-                    player1.penance_double_next_clash = False
-                if getattr(player2, "penance_double_next_clash", False):
+                # Penance: if active, double both directions for that player
+                if getattr(player1, "penance_double_active", False):
                     damage1_to_2 *= 2
-                    player2.penance_double_next_clash = False
+                    damage2_to_1 *= 2
+                if getattr(player2, "penance_double_active", False):
+                    damage1_to_2 *= 2
+                    damage2_to_1 *= 2
 
                 player2.take_damage(damage1_to_2)
                 player1.take_damage(damage2_to_1)
+                round1.damage_to_opponent = damage1_to_2
+                round2.damage_from_opponent = damage1_to_2
+                round2.damage_to_opponent = damage2_to_1
+                round1.damage_from_opponent = damage2_to_1
             elif round1.fumbled and not round2.fumbled:
                 # Only player2 attacks
                 damage2_to_1 = self.calculate_damage(round2.insults, [])
-                if getattr(player1, "penance_double_next_clash", False):
+                if getattr(player2, "penance_double_active", False):
                     damage2_to_1 *= 2
-                    player1.penance_double_next_clash = False
                 player1.take_damage(damage2_to_1)
                 damage1_to_2 = 0
+                round2.damage_to_opponent = damage2_to_1
+                round1.damage_from_opponent = damage2_to_1
             elif round2.fumbled and not round1.fumbled:
                 damage1_to_2 = self.calculate_damage(round1.insults, [])
-                if getattr(player2, "penance_double_next_clash", False):
+                if getattr(player1, "penance_double_active", False):
                     damage1_to_2 *= 2
-                    player2.penance_double_next_clash = False
                 player2.take_damage(damage1_to_2)
                 damage2_to_1 = 0
+                round1.damage_to_opponent = damage1_to_2
+                round2.damage_from_opponent = damage1_to_2
             else:
                 damage1_to_2 = damage2_to_1 = 0
 
@@ -520,6 +629,18 @@ class GameEngine:
                     rounds=rounds,
                     final_health={player1.name: player1.health, player2.name: player2.health}
                 )
+
+        # Emotion: debate end hooks
+        for emo in (getattr(player1, 'emotions', []) or []):
+            try:
+                emo.on_debate_end(EmotionContext(self, player1, player2, max_rounds, {}))
+            except Exception:
+                pass
+        for emo in (getattr(player2, 'emotions', []) or []):
+            try:
+                emo.on_debate_end(EmotionContext(self, player2, player1, max_rounds, {}))
+            except Exception:
+                pass
 
         # Determine winner by health
         if player1.health > player2.health:

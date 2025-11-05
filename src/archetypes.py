@@ -6,9 +6,10 @@ from typing import List, Dict, Any
 from dataclasses import dataclass
 from dice import (
     Dice, NormalDice, BlissDice, ComedownDice, BlankDice,
-    HighMindedDice, SpiteDice, InebriationDice, SimpletonsDice, NostalgiaDice,
+    HighMindedDice, SpiteDice, InebriationDice, GroundedDice, NostalgiaDice,
     PenanceDice, AcedicDice, PilferDice, CatastrophizeDice, RidiculeDice,
-    CholericDie, MelancholicDie, PhlegmaticDie, SanguineDie
+    CholericDie, MelancholicDie, PhlegmaticDie, SanguineDie,
+    AporicDice, NauseaDice, ApatheticDice, AbyssalDice
 )
 
 # Centralized game constants
@@ -23,10 +24,18 @@ class Player:
     forgiveness_tokens: int = 0
     neurosis_tokens: int = 0
     regret_tokens: int = 0
+    eureka_tokens: int = 0
+    breakthrough_tokens: int = 0
+    rehash_tokens: int = 0
+    fumble_shields: int = 0
     bust_protection: bool = False
-    penance_double_next_clash: bool = False
+    penance_double_active: bool = False
     pending_pilfer_next_round: bool = False
     pending_echo_values: List[int] = None
+    totems: Dict[str, Any] = None
+    emotions: List[Any] = None
+    win_counter: int = 0
+    force_commit: bool = False
     dice: List[Dice] = None
 
     def __post_init__(self):
@@ -34,6 +43,10 @@ class Player:
             self.dice = []
         if self.pending_echo_values is None:
             self.pending_echo_values = []
+        if self.totems is None:
+            self.totems = {}
+        if self.emotions is None:
+            self.emotions = []
 
     def take_damage(self, amount: int) -> int:
         """Take damage, return actual damage taken"""
@@ -107,6 +120,14 @@ class TabulaRasa(Archetype):
         super().__init__("Tabula Rasa", [NormalDice() for _ in range(6)])
 
 
+class Hedonist(Archetype):
+    """The Hedonist: Bliss + Comedown + 4x normal"""
+
+    def __init__(self):
+        super().__init__("The Hedonist", [
+            BlissDice(), ComedownDice(),
+            NormalDice(), NormalDice(), NormalDice(), NormalDice()
+        ])
 class Euphoria(Archetype):
     """Euphoria: 1x Bliss Dice, 1x Comedown Dice, 4x normal d6"""
 
@@ -229,6 +250,71 @@ class Anxiety(Archetype):
         )
 
 
+# New renamed archetypes per latest spec
+class Physiognomist(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Physiognomist",
+            [CholericDie(), MelancholicDie(), PhlegmaticDie(), SanguineDie(), NormalDice(), NormalDice()]
+        )
+
+class Rationalist(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Rationalist",
+            [HighMindedDice(), HighMindedDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+class Fatalist(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Fatalist",
+            [SpiteDice(), InebriationDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+class Transcendentalist(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Transcendentalist",
+            [GroundedDice(), NostalgiaDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+class Puritan(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Puritan",
+            [PenanceDice(), AcedicDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+class Machiavalian(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Machiavalian",
+            [PilferDice(), PilferDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+class Absurdist(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Absurdist",
+            [AporicDice(), NauseaDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+class Stoic(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Stoic",
+            [ApatheticDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+class Nihilist(Archetype):
+    def __init__(self):
+        super().__init__(
+            "The Nihilist",
+            [AbyssalDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice(), NormalDice()]
+        )
+
+
 # Special face dice for testing
 class SpecialFaceDice(Dice):
     """Dice with custom face values for testing"""
@@ -259,4 +345,84 @@ SPECIAL_DICE_DEFINITIONS = {
     "more middle": [1, 2, 4, 4, 5, 6],
     "all_blank": [None, None, None, None, None, None],  # X, X, X, X, X, X
     "half_blank": [1, 2, 3, None, None, None]  # 1, 2, 3, X, X, X
+}
+
+# Defense dice faces (name -> faces)
+DEFENSE_DICE_DEFINITIONS: Dict[str, List[int]] = {
+    "Halo-Effect": [1, 2, 3, 3, 4, 4],
+    "Scapegoat": [2, 3, 4, 5, 6, 6],
+    "Normalcy": [1, 2, 3, 4, 5, 6],
+    "Just-World": [1, 2, 3, 4, 5, 6],
+    "Victimhood": [None, 1, 2, 4, 5, 6],
+    "Dunning-Kruger": [2, 3, 4, 5, 6, 6],
+    "Mere-Exposure": [1, 2, 3, 4, 5, 6],
+    "Egocentric": [1, 1, 2, 2, 6, 6],
+    "Illusory-Control": [1, 2, 3, 4, 5, 6],
+    "Bandwagon": [1, 2, 3, 4, 5, 6],
+    "Narrative-Fallacy": [1, 2, 3, 4, 5, 6],
+    "Groupshift": [1, 2, 3, 4, 5, 6],
+}
+
+# Human-readable defense dice descriptions
+DEFENSE_DICE_DESCRIPTIONS: Dict[str, Dict[str, str]] = {
+    "Halo-Effect": {
+        "subtitle": "Defense Die",
+        "psych": "Triggers when this die is live, and any other of your live dice lands on a 6. Includes normal rolling, as well as manual changing.",
+        "som": "Triggers when your roll contains zero 6s."
+    },
+    "Scapegoat": {
+        "subtitle": "Defense Die",
+        "psych": "If this die is live during a fumble, roll a d6: triggers that many times.",
+        "som": "If you successfully commit 3 separate insults in a single debate, gain a eureka token."
+    },
+    "Normalcy": {
+        "subtitle": "Defense Die",
+        "psych": "Triggers when banked as part of a one-pair.",
+        "som": "Trigger after rolling only odd faces."
+    },
+    "Just-World": {
+        "subtitle": "Defense Die",
+        "psych": "Trigger when banking four or more dice in a single insult.",
+        "som": "Trigger after rolling only even faces."
+    },
+    "Victimhood": {
+        "subtitle": "Defense Die",
+        "psych": "Whenever you take more than 3 damage, roll a d6. If the result is < the damage you took, gain a breakthrough token.",
+        "som": "Whenever you lose a debate, gain a eureka token."
+    },
+    "Dunning-Kruger": {
+        "subtitle": "Defense Die",
+        "psych": "Triggers when you bank an insult of only 1s.",
+        "som": "Whenever you fumble, gain 1 fumble-shield token and 1 breakthrough token. (Prevented fumbles do not activate 'when you fumble' triggers)"
+    },
+    "Mere-Exposure": {
+        "subtitle": "Defense Die",
+        "psych": "Triggers any time you bank an insult that contains a 1.",
+        "som": "Every time you roll a '1', place a counter on this card. When it reaches 6, remove it, and trigger this 3 times."
+    },
+    "Egocentric": {
+        "subtitle": "Defense Die",
+        "psych": "Trigger every time you deal exactly 1 damage.",
+        "som": "At the start of each round, triggers twice for every debate that has passed."
+    },
+    "Illusory-Control": {
+        "subtitle": "Defense Die",
+        "psych": "Triggers every time you receive a token (not by its imbued emotion).",
+        "som": "Triggers every time you decrement a token (but not 'clearing' tokens)."
+    },
+    "Bandwagon": {
+        "subtitle": "Defense Die",
+        "psych": "Triggers any time an echo die is summoned by yourself or opponents (not by its imbued emotion).",
+        "som": "Increase your max live die count by 1. You can convert one of your somatic dice back to psychological, and roll it alongside your default 6. (Bandwagon Die has no somatic trigger)"
+    },
+    "Narrative-Fallacy": {
+        "subtitle": "Defense Die",
+        "psych": "Triggers when banking a straight.",
+        "som": "Triggers every roll, if every live die has the normal faces [1, 2, 3, 5, 6]."
+    },
+    "Groupshift": {
+        "subtitle": "Defense Die",
+        "psych": "If you bank 5 or more dice, and still lose the debate, gain a eureka token.",
+        "som": "If you bank 3 or less dice, and win the debate, gain a breakthrough token."
+    },
 }

@@ -256,3 +256,481 @@ class HandTester:
             performance.append((face_values, score))
 
         return sorted(performance, key=lambda x: x[1], reverse=True)
+
+
+class DefenseSimulator:
+    """Simulates defense dice triggers across archetypes vs Tabula Rasa."""
+
+    def __init__(self, game_engine: GameEngine):
+        self.game_engine = game_engine
+
+    def _clone_with_defense(self, archetype: Archetype, defense_die, mode: str) -> Archetype:
+        # Shallow clone by constructing a new Archetype with modified dice
+        dice = [d for d in archetype.dice]
+        # Replace first NormalDice with defense die only for psychological
+        if mode == 'psychological':
+            for i, d in enumerate(dice):
+                if isinstance(d, NormalDice):
+                    dice[i] = defense_die
+                    break
+        # For somatic, we don't insert into dice pool; we attach as attribute
+        new_arch = Archetype(f"{archetype.name}+Def", dice)
+        setattr(new_arch, "_somatic_defense_die", defense_die if mode == 'somatic' else None)
+        setattr(new_arch, "_defense_mode", mode)
+        return new_arch
+
+    def _eval_triggers(self, defense_key: str, mode: str, debate_result, rounds_p1, rounds_p2) -> Tuple[int, int]:
+        # Count triggers for player1 only (defense side). Return (triggers_total, rounds_count)
+        import random
+        triggers = 0
+        round_count = len(rounds_p1)
+
+        # helpers
+        def any_six(vals):
+            vals = vals or []
+            return any(v == 6 for v in vals if isinstance(v, int) and v > 0)
+        def no_six(vals):
+            vals = vals or []
+            return not any_six(vals)
+        def only_odds(vals):
+            vals = vals or []
+            # If no valid ints, treat as False for only-odds checks
+            filtered = [v for v in vals if isinstance(v,int) and v>0]
+            return bool(filtered) and all((v % 2 == 1) for v in filtered)
+        def only_evens(vals):
+            vals = vals or []
+            filtered = [v for v in vals if isinstance(v,int) and v>0]
+            return bool(filtered) and all((v % 2 == 0) for v in filtered)
+
+        # Per-round evaluation
+        insults_committed_total = 0
+        passive_counter = 0
+        for idx, rr in enumerate(rounds_p1):
+            insults_committed_total += rr.insults_banked_count
+
+            if defense_key == 'Halo-Effect':
+                if mode == 'psychological':
+                    if any_six(rr.initial_live_values):
+                        triggers += 1
+                else:
+                    if no_six(rr.initial_live_values):
+                        triggers += 1
+
+            elif defense_key == 'Scapegoat':
+                if mode == 'psychological':
+                    if rr.fumbled:
+                        triggers += random.randint(1, 6)
+                else:
+                    if insults_committed_total >= 3:
+                        triggers += 3
+                        insults_committed_total = -9999  # only once
+
+            elif defense_key == 'Normalcy':
+                if mode == 'psychological':
+                    if any(len(c.dice) == 2 and len(set(c.dice)) == 1 for c in rr.insults):
+                        triggers += 1
+                else:
+                    if only_odds(rr.initial_live_values):
+                        triggers += 1
+
+            elif defense_key == 'Just-World':
+                if mode == 'psychological':
+                    if any(len(c.dice) >= 4 for c in rr.insults):
+                        triggers += 1
+                else:
+                    if only_evens(rr.initial_live_values):
+                        triggers += 1
+
+            elif defense_key == 'Victimhood':
+                if mode == 'psychological':
+                    dmg = rr.damage_from_opponent
+                    if dmg > 3:
+                        if random.randint(1, 6) < dmg:
+                            triggers += 3  # eureka
+                else:
+                    if debate_result.winner and rounds_p1 and debate_result.winner != rounds_p1[0].player_name and debate_result.winner != 'Tie':
+                        triggers += 3
+
+            elif defense_key == 'Dunning-Kruger':
+                if mode == 'psychological':
+                    if any(all(v == 1 for v in c.dice) for c in rr.insults):
+                        triggers += 1
+                else:
+                    if rr.fumbled:
+                        triggers += 4  # 1 fumble protect (count as 1) + 3 eureka
+
+            elif defense_key == 'Mere-Exposure':
+                if mode == 'psychological':
+                    if any(1 in c.dice for c in rr.insults):
+                        triggers += 1
+                else:
+                    for v in (rr.initial_live_values or []):
+                        if v == 1:
+                            passive_counter += 1
+                            if passive_counter >= 6:
+                                passive_counter = 0
+                                triggers += 3
+
+            elif defense_key == 'Egocentric':
+                if mode == 'psychological':
+                    if rr.damage_to_opponent == 1:
+                        triggers += 1
+                else:
+                    # start of round triggers twice per debate passed
+                    triggers += 2 * idx
+
+            elif defense_key == 'Illusory-Control':
+                # Approximate: not enough token tracking; leave minimal count 0 for now
+                pass
+
+            elif defense_key == 'Bandwagon':
+                if mode == 'psychological':
+                    # Count echo dice summoned this round (approximate)
+                    triggers += getattr(rr, 'echo_summoned_count', 0) or 0
+                else:
+                    # Somatic has no trigger
+                    pass
+
+            elif defense_key == 'Narrative-Fallacy':
+                if mode == 'psychological':
+                    if any(self._is_straight(c.dice) for c in rr.insults):
+                        triggers += 1
+                else:
+                    normals = [1,2,3,5,6]
+                    vals = rr.initial_live_values or []
+                    if vals and all((v in normals) for v in vals if isinstance(v,int) and v>0):
+                        triggers += 1
+
+        # Groupshift: debate-level conditions (banked counts and result)
+        if defense_key == 'Groupshift' and rounds_p1:
+            total_banked = sum(r.insults_banked_count for r in rounds_p1)
+            pname = rounds_p1[0].player_name
+            if mode == 'psychological':
+                if total_banked >= 5 and debate_result.winner and debate_result.winner != pname and debate_result.winner != 'Tie':
+                    triggers += 3  # eureka token proxy
+            else:
+                if total_banked <= 3 and debate_result.winner == pname:
+                    triggers += 3  # breakthrough token proxy
+
+        return triggers, round_count
+
+    def _is_straight(self, dice: List[int]) -> bool:
+        s = sorted(set(dice))
+        if len(s) < 3:
+            return False
+        return all(s[i+1] == s[i] + 1 for i in range(len(s)-1))
+
+    def simulate_defense(self, defense_key: str, defense_die, mode: str, archetypes: List[Archetype], num_matches: int = 500) -> Dict[str, Any]:
+        results = {"defense": defense_key, "mode": mode, "win": 0, "tie": 0, "loss": 0, "triggers": 0, "rounds": 0}
+        control = TabulaRasa()
+        for base in archetypes:
+            test_arch = self._clone_with_defense(base, defense_die, mode)
+            for _ in range(num_matches):
+                p1 = test_arch.create_player('P1')
+                p2 = control.create_player('P2')
+                debate = self.game_engine.play_debate(p1, test_arch, p2, control)
+                if debate.winner == 'P1':
+                    results['win'] += 1
+                elif debate.winner == 'Tie':
+                    results['tie'] += 1
+                else:
+                    results['loss'] += 1
+                # split rounds
+                r1 = [r for r in debate.rounds if r.player_name == 'P1']
+                r2 = [r for r in debate.rounds if r.player_name == 'P2']
+                trig, rc = self._eval_triggers(defense_key, mode, debate, r1, r2)
+                results['triggers'] += trig
+                results['rounds'] += rc
+        total = results['win'] + results['loss'] + results['tie']
+        results['win_rate'] = results['win'] / total if total else 0
+        results['tie_rate'] = results['tie'] / total if total else 0
+        results['triggers_per_game'] = results['triggers'] / total if total else 0
+        results['triggers_per_round'] = results['triggers'] / results['rounds'] if results['rounds'] else 0
+        return results
+
+
+class SynergySimulator:
+    """Keyword-based synergy simulator per spec: maintain player keyword set; pick new items maximizing shared keywords."""
+
+    KEYWORDS = [
+        'neurosis','regret','forgiveness','eureka','breakthrough','fumble','fumble-shield',
+        'rehash','echo','reroll','heal','damage','steal','token','counter','odd','even',
+        'straight','pair','bank','waxy','copy','shield','commit','fumble-protection','bust'
+    ]
+
+    # No static archetype keyword mapping; derive from dice properties only
+
+    @staticmethod
+    def extract_keywords(text: str) -> set:
+        t = (text or '').lower()
+        kws = set()
+        for k in SynergySimulator.KEYWORDS:
+            if k in t:
+                kws.add(k)
+        if 'fumble shield' in t or 'fumbleshield' in t:
+            kws.add('fumble-shield')
+        if 'echo die' in t or 'echo dice' in t:
+            kws.add('echo')
+        return kws
+
+    def archetype_keywords(self, arch: Archetype) -> set:
+        kws = set()
+        for d in getattr(arch, 'dice', []):
+            name = getattr(d, 'name', '')
+            # derive odd/even from faces
+            faces = getattr(d, 'faces', []) or []
+            nums = [v for v in faces if isinstance(v, int)]
+            if nums:
+                odd_count = sum(1 for v in nums if v % 2 == 1)
+                even_count = sum(1 for v in nums if v % 2 == 0)
+                if even_count <= 1:
+                    kws.add('odd')
+                if odd_count <= 1:
+                    kws.add('even')
+        return kws
+
+    def simulate(self, archetypes: List[Archetype], num_games: int = 100) -> Dict[str, float]:
+        from emotions import EMOTION_DEFINITIONS
+        from archetypes import DEFENSE_DICE_DESCRIPTIONS, DEFENSE_DICE_DEFINITIONS
+        results: Dict[str, float] = {}
+        defense_items = []
+        for name, desc in DEFENSE_DICE_DESCRIPTIONS.items():
+            text = (desc.get('psych','') + ' ' + desc.get('som',''))
+            faces = DEFENSE_DICE_DEFINITIONS.get(name, [])
+            nums = [v for v in faces if isinstance(v, int)]
+            if nums:
+                odd_count = sum(1 for v in nums if v % 2 == 1)
+                even_count = sum(1 for v in nums if v % 2 == 0)
+                if even_count <= 1:
+                    text += ' odd'
+                if odd_count <= 1:
+                    text += ' even'
+            defense_items.append((name, text))
+        for arch in archetypes:
+            total_synergies = 0
+            for _ in range(num_games):
+                current_keywords = set(self.archetype_keywords(arch))
+                chosen_emotions = []
+                chosen_dice = []
+                chosen_emotion_keywords = []
+                chosen_die_keywords = []
+                for _p in range(3):
+                    # draw 3 emotions, 3 dice
+                    e_choices = random.sample(EMOTION_DEFINITIONS, k=min(3, len(EMOTION_DEFINITIONS)))
+                    d_choices = random.sample(defense_items, k=min(3, len(defense_items)))
+                    # compute best individual picks against current keywords
+                    def overlap_score(tags: set) -> int:
+                        return len(tags & current_keywords)
+                    best_e = None; best_e_kws = set(); best_e_score = -1
+                    e_with_kws = []
+                    for e in e_choices:
+                        ek = self.extract_keywords(e['markdown'])
+                        e_with_kws.append((e, ek))
+                        sc = overlap_score(ek)
+                        if sc > best_e_score or (sc == best_e_score and len(ek) > len(best_e_kws)):
+                            best_e = e; best_e_kws = ek; best_e_score = sc
+                    best_d = None; best_d_kws = set(); best_d_score = -1
+                    d_with_kws = []
+                    for name, txt in d_choices:
+                        dk = self.extract_keywords(txt)
+                        d_with_kws.append(((name, txt), dk))
+                        sc = overlap_score(dk)
+                        if sc > best_d_score or (sc == best_d_score and len(dk) > len(best_d_kws)):
+                            best_d = (name, txt); best_d_kws = dk; best_d_score = sc
+                    # if zero overlap so far, pick the largest keyword sets to seed
+                    if best_e_score <= 0:
+                        best_e, best_e_kws = max(e_with_kws, key=lambda x: len(x[1]))
+                    if best_d_score <= 0:
+                        best_d, best_d_kws = max(d_with_kws, key=lambda x: len(x[1]))
+                    # keep selections and grow keyword pool
+                    chosen_emotions.append(best_e)
+                    chosen_emotion_keywords.append(best_e_kws)
+                    current_keywords |= best_e_kws
+                    chosen_dice.append(best_d)
+                    chosen_die_keywords.append(best_d_kws)
+                    current_keywords |= best_d_kws
+                # count cross pairs (emotion, die) that share any keyword
+                game_synergies = 0
+                for ek in chosen_emotion_keywords:
+                    for dk in chosen_die_keywords:
+                        if ek & dk:
+                            game_synergies += 1
+                total_synergies += game_synergies
+            results[arch.name] = (total_synergies / num_games) if num_games else 0.0
+        return results
+
+class BiasEmotionSimulator:
+    """Simulates archetypes augmented with psychological and somatic bias dice and emotions.
+    - For each run: for a given archetype, select 2 psych defense dice (replace normals), 2 somatic defense dice (bench), and 2 emotions.
+    - Play a debate vs a random opponent archetype; aggregate win/tie/loss stats by emotion, by bias die, and by archetype.
+    - Detect potential infinite loops by capping rounds per debate.
+    """
+
+    def __init__(self, game_engine: GameEngine, max_rounds: int = 50):
+        self.game_engine = game_engine
+        self.max_rounds = max_rounds
+
+    def _clone_with_bias(self, base: Archetype, psych_dice: List[Tuple[str, List[int]]]) -> Archetype:
+        from archetypes import SpecialFaceDice
+        # replace two Normal dice with provided SpecialFaceDice
+        normal_indices = [i for i, d in enumerate(base.dice) if getattr(d, 'name', '') == 'Normal']
+        dice_copy = [d for d in base.dice]
+        replace_slots = normal_indices[:len(psych_dice)]
+        for slot, (name, faces) in zip(replace_slots, psych_dice):
+            dice_copy[slot] = SpecialFaceDice(faces, name)
+        class TempArch(Archetype):
+            def __init__(self, name: str, dice):
+                super().__init__(name, dice)
+        return TempArch(base.name, dice_copy)
+
+    def simulate(self, archetypes: List[Archetype], num_games_per_arch: int = 200) -> Dict[str, Any]:
+        from emotions import EMOTION_DEFINITIONS
+        from emotions_runtime import create_emotions
+        from archetypes import DEFENSE_DICE_DEFINITIONS
+
+        emotion_names = [e['name'] for e in EMOTION_DEFINITIONS]
+        defense_list = list(DEFENSE_DICE_DEFINITIONS.items())
+
+        emotion_stats: Dict[str, Dict[str, int]] = {}
+        bias_stats: Dict[str, Dict[str, int]] = {}
+        arch_stats: Dict[str, Dict[str, int]] = {}
+        pair_counts: Dict[Tuple[str, str], Dict[str, int]] = {}
+        loop_loadouts: Dict[str, int] = {}
+
+        names = [a.name for a in archetypes]
+
+        def rec_stats(d: Dict[str, Dict[str, int]], key: str, outcome: str):
+            s = d.setdefault(key, {"win": 0, "loss": 0, "tie": 0, "games": 0})
+            s[outcome] += 1
+            s["games"] += 1
+
+        for arch in archetypes:
+            for _ in range(num_games_per_arch):
+                # sample two psych dice and two somatic dice; two emotions
+                psych = random.sample(defense_list, k=2)
+                som = random.sample(defense_list, k=2)
+                emos = random.sample(emotion_names, k=2) if len(emotion_names) >= 2 else emotion_names
+                # create augmented archetype
+                aug = self._clone_with_bias(arch, psych)
+                # choose opponent randomly
+                opp_base = random.choice([a for a in archetypes if a.name != arch.name])
+                p1 = aug.create_player('P1')
+                p2 = opp_base.create_player('P2')
+                # metadata attach (not used by engine yet)
+                p1.bias_psych = [n for n, _ in psych]  # type: ignore
+                p1.bias_somatic = [n for n, _ in som]  # type: ignore
+                p1.emotions = create_emotions(emos)  # type: ignore
+
+                debate = self.game_engine.play_debate(p1, aug, p2, opp_base, max_rounds=self.max_rounds)  # type: ignore
+
+                # Determine outcome
+                if debate.winner == 'P1':
+                    outcome = 'win'
+                elif debate.winner == 'Tie':
+                    outcome = 'tie'
+                else:
+                    outcome = 'loss'
+
+                # loop detection
+                looped = False
+                if hasattr(debate, 'rounds') and len(debate.rounds) >= self.max_rounds:
+                    looped = True
+                    key = f"{arch.name}|psych:{'+'.join([n for n,_ in psych])}|som:{'+'.join([n for n,_ in som])}|emo:{'+'.join(emos)}"
+                    loop_loadouts[key] = loop_loadouts.get(key, 0) + 1
+
+                # aggregate stats
+                arch_key = arch.name
+                rec_stats(arch_stats, arch_key, outcome)
+                for en in emos:
+                    rec_stats(emotion_stats, en, outcome)
+                for (bn, _faces) in psych:
+                    rec_stats(bias_stats, bn, outcome)
+                # pairings
+                # emotion+emotion
+                if len(emos) == 2:
+                    tkey = tuple(sorted(emos))
+                    rec_stats(pair_counts, f"emotion|{tkey[0]}+{tkey[1]}", outcome)  # type: ignore
+                # bias+bias
+                bpair = tuple(sorted([bn for bn,_ in psych]))
+                rec_stats(pair_counts, f"bias|{bpair[0]}+{bpair[1]}", outcome)  # type: ignore
+                # arch+emotion
+                for en in emos:
+                    rec_stats(pair_counts, f"arch_emotion|{arch.name}+{en}", outcome)
+                # bias+emotion
+                for bn,_ in psych:
+                    for en in emos:
+                        rec_stats(pair_counts, f"bias_emotion|{bn}+{en}", outcome)
+
+        # compute summaries
+        def summarize(d: Dict[str, Dict[str, int]]) -> Dict[str, Dict[str, float]]:
+            out: Dict[str, Dict[str, float]] = {}
+            for k, v in d.items():
+                games = max(1, v.get('games', 0))
+                out[k] = {
+                    'win_rate': v.get('win', 0) / games,
+                    'tie_rate': v.get('tie', 0) / games,
+                    'games': float(games),
+                }
+            return out
+
+        return {
+            'emotion_stats': summarize(emotion_stats),
+            'bias_stats': summarize(bias_stats),
+            'archetype_stats': summarize(arch_stats),
+            'pair_stats': summarize(pair_counts),
+            'loops': loop_loadouts,
+        }
+
+    def keyword_frequencies(self, archetypes: List[Archetype], num_games: int = 100) -> Dict[str, float]:
+        from emotions import EMOTION_DEFINITIONS
+        from archetypes import DEFENSE_DICE_DESCRIPTIONS, DEFENSE_DICE_DEFINITIONS
+        freq: Dict[str, int] = {k: 0 for k in self.KEYWORDS}
+        total_overlaps = 0
+        defense_items = []
+        for name, desc in DEFENSE_DICE_DESCRIPTIONS.items():
+            text = (desc.get('psych','') + ' ' + desc.get('som',''))
+            faces = DEFENSE_DICE_DEFINITIONS.get(name, [])
+            nums = [v for v in faces if isinstance(v, int)]
+            if nums:
+                odd_count = sum(1 for v in nums if v % 2 == 1)
+                even_count = sum(1 for v in nums if v % 2 == 0)
+                if even_count <= 1:
+                    text += ' odd'
+                if odd_count <= 1:
+                    text += ' even'
+            defense_items.append((name, text))
+        for arch in archetypes:
+            for _ in range(num_games):
+                current_keywords = set(self.archetype_keywords(arch))
+                chosen_emotion_keywords = []
+                chosen_die_keywords = []
+                for _p in range(3):
+                    e_choices = random.sample(EMOTION_DEFINITIONS, k=min(3, len(EMOTION_DEFINITIONS)))
+                    d_choices = random.sample(defense_items, k=min(3, len(defense_items)))
+                    def overlap_score(tags: set) -> int:
+                        return len(tags & current_keywords)
+                    # best emotion
+                    e_with_kws = [(e, self.extract_keywords(e['markdown'])) for e in e_choices]
+                    best_e, best_e_kws = max(e_with_kws, key=lambda x: (overlap_score(x[1]), len(x[1])))
+                    if overlap_score(best_e_kws) <= 0:
+                        best_e, best_e_kws = max(e_with_kws, key=lambda x: len(x[1]))
+                    chosen_emotion_keywords.append(best_e_kws)
+                    current_keywords |= best_e_kws
+                    # best die
+                    d_with_kws = [((name, txt), self.extract_keywords(txt)) for name, txt in d_choices]
+                    best_d, best_d_kws = max(d_with_kws, key=lambda x: (overlap_score(x[1]), len(x[1])))
+                    if overlap_score(best_d_kws) <= 0:
+                        best_d, best_d_kws = max(d_with_kws, key=lambda x: len(x[1]))
+                    chosen_die_keywords.append(best_d_kws)
+                    current_keywords |= best_d_kws
+                # accumulate overlaps
+                for ek in chosen_emotion_keywords:
+                    for dk in chosen_die_keywords:
+                        inter = ek & dk
+                        if inter:
+                            total_overlaps += 1
+                            for kw in inter:
+                                freq[kw] = freq.get(kw, 0) + 1
+        if total_overlaps == 0:
+            return {k: 0.0 for k in freq}
+        return {k: (v / total_overlaps) for k, v in freq.items()}

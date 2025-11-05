@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="../assets/cards_print.css">
+</head>
+<body>
+  <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">🌙</button>
+  <div class="cards-container">
+    {% for c in cards %}
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="card-name">{{ c.name }}</span>
+          </div>
+          {% if c.subtitle %}<i class="card-category">{{ c.subtitle }}</i>{% endif %}
+        </div>
+        {% if c.type == 'defense' %}
+          <div class="spacer"></div>
+          <div class="card-body"><span class="hilite">{{ c.rules_html | safe }}</span></div>
+          <div class="card-image-wrap"><img src="{{ c.image_src }}" class="card-image"></div>
+        {% else %}
+          <div class="spacer"></div>
+          <div class="card-body"><span class="hilite">{{ c.rules_html | safe }}</span></div>
+          <div class="card-image-wrap"><img src="{{ c.image_src }}" class="card-image"></div>
+        {% endif %}
+        {% if c.quote %}<div class="card-footer">{{ c.quote }}</div>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  <script>
+    (function() {
+      // theme toggle
+      (function(){
+        var key = 'theme';
+        var saved = localStorage.getItem(key);
+        var hour = new Date().getHours();
+        var isNight = (hour >= 21 || hour < 5);
+        if (saved === 'dark' || (!saved && (isNight || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)))) {
+          document.body.classList.add('dark');
+        }
+        var btn = document.getElementById('themeToggle');
+        if (btn) btn.addEventListener('click', function(){
+          var d = document.body.classList.toggle('dark');
+          localStorage.setItem(key, d ? 'dark' : 'light');
+        });
+      })();
+
+      function fitTitle(el) {
+        if (!el) return;
+        var computed = window.getComputedStyle(el);
+        var size = parseFloat(computed.fontSize) || 20;
+        var minSize = 10;
+        var parentWidth = el.parentElement ? el.parentElement.clientWidth : el.clientWidth;
+        el.style.whiteSpace = 'nowrap';
+        el.style.display = 'inline-block';
+        el.style.maxWidth = '100%';
+        el.style.width = 'fit-content';
+        el.style.fontSize = size + 'px';
+        var guard = 120;
+        // shrink only if content exceeds the available width
+        while (el.getBoundingClientRect().width > parentWidth && size > minSize && guard-- > 0) {
+          size -= 0.5;
+          el.style.fontSize = size + 'px';
+        }
+      }
+      function fitAll() {
+        document.querySelectorAll('.card-name').forEach(fitTitle);
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', fitAll);
+      } else {
+        fitAll();
+      }
+      window.addEventListener('load', fitAll);
+      window.addEventListener('resize', fitAll);
+      window.matchMedia('print').addListener(fitAll);
+    })();
+  </script>
+</body>
+</html>

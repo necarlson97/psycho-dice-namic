@@ -112,11 +112,11 @@ class InebriationDice(Dice):
         return {}
 
 
-class SimpletonsDice(Dice):
-    """Simpleton's Dice: X,1,2,3,4,4 - pair upgrade handled at bank time"""
+class GroundedDice(Dice):
+    """Grounded Dice: X,1,2,3,4,4 - pair grants echo 1 to the insult (handled at bank time)"""
 
     def __init__(self):
-        super().__init__([None, 1, 2, 3, 4, 4], "Simpleton")
+        super().__init__([None, 1, 2, 3, 4, 4], "Grounded")
 
     def special_effect(self, value: int, player) -> Dict[str, Any]:
         return {}
@@ -182,6 +182,14 @@ class CatastrophizeDice(Dice):
         return {}
 
 
+class AporicDice(CatastrophizeDice):
+    """Alias of Catastrophize with different display name"""
+
+    def __init__(self):
+        super().__init__()
+        self.name = "Aporic"
+
+
 class RidiculeDice(Dice):
     """Ridicule Dice: 1..6 - on 6: if no regret, gain one; else transfer one to opponent"""
 
@@ -192,6 +200,12 @@ class RidiculeDice(Dice):
         if value == 6:
             return {"ridicule_six": 1}
         return {}
+
+
+class NauseaDice(RidiculeDice):
+    def __init__(self):
+        super().__init__()
+        self.name = "Nausea"
 
 
 class CholericDie(Dice):
@@ -244,6 +258,29 @@ class BlankDice(Dice):
 
     def special_effect(self, value: int, player) -> Dict[str, Any]:
         return {}
+
+
+class ApatheticDice(Dice):
+    """Apathetic Dice: X,X,X,6,6,6 - if banked, heal 2 (handled at bank time)"""
+
+    def __init__(self):
+        super().__init__([None, None, None, 6, 6, 6], "Apathetic")
+
+    def special_effect(self, value: int, player) -> Dict[str, Any]:
+        return {}
+
+
+class AbyssalDice(Dice):
+    """Abyssal Dice: X,X,X,X,X,X - after banking, can be added copying lowest die (handled at bank time)"""
+
+    def __init__(self):
+        super().__init__([None, None, None, None, None, None], "Abyssal")
+
+    def special_effect(self, value: int, player) -> Dict[str, Any]:
+        return {}
+
+    def get_rules_text(self) -> str:
+        return "After banking an insult, this die can be added to it, copying the value of that insult's lowest die"
 
 
 class ComboDetector:

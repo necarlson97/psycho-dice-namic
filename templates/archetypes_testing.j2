@@ -69,18 +69,44 @@
         th {
             background: rgba(255, 255, 255, 0.1);
         }
+        .theme-toggle { position: fixed; top: 10px; right: 10px; z-index: 999; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+        @media print { .theme-toggle { display: none; } }
+        body.dark { background: #0b0e14; color: #eaeaea; }
+        body.dark .container { background: rgba(0,0,0,0.35); }
+        body.dark .chart-container { background: rgba(0,0,0,0.8); color: #eaeaea; }
     </style>
 </head>
 <body>
+    <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">🌙</button>
     <div class="container">
         <h1>🎲 Psycho-Dice-Namic: Archetype Analysis</h1>
 
         <div class="chart-container">
             <div id="archetype-performance-chart"></div>
         </div>
+        <div class="chart-container">
+            <div id="archetype-synergy-chart"></div>
+        </div>
+        <div class="chart-container">
+            <div id="synergy-keywords-chart"></div>
+        </div>
     </div>
 
     <script>
+        (function(){
+            var key = 'theme';
+            var saved = localStorage.getItem(key);
+            var hour = new Date().getHours();
+            var isNight = (hour >= 21 || hour < 5);
+            if (saved === 'dark' || (!saved && (isNight || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)))) {
+                document.body.classList.add('dark');
+            }
+            document.getElementById('themeToggle').addEventListener('click', function(){
+                var d = document.body.classList.toggle('dark');
+                localStorage.setItem(key, d ? 'dark' : 'light');
+            });
+        })();
+    </script>
         // Archetype stacked Win + Tie chart
         var names = {{ arch_names|tojson }};
         var winRates = {{ arch_win_rates|tojson }};
@@ -120,6 +146,40 @@
         };
 
         Plotly.newPlot('archetype-performance-chart', perfData, perfLayout);
+
+        // Synergy chart: average synergies per game
+        var synergies = {{ arch_synergies|tojson }};
+        var synData = [{
+            x: names,
+            y: synergies,
+            type: 'bar',
+            name: 'Avg synergies per game',
+            marker: { color: '#41c7c7' }
+        }];
+        var synLayout = {
+            title: 'Average Synergies per Contemplation-Only Game',
+            xaxis: { title: 'Archetype' },
+            yaxis: { title: 'Avg synergies', rangemode: 'tozero' }
+        };
+        Plotly.newPlot('archetype-synergy-chart', synData, synLayout);
+
+        // Keyword representation chart (top 20)
+        var kwNames = {{ synergy_keyword_names|tojson }};
+        var kwVals = {{ synergy_keyword_values|tojson }};
+        var kwData = [{
+            x: kwNames,
+            y: kwVals,
+            type: 'bar',
+            marker: { color: '#8f7ae5' }
+        }];
+        var kwLayout = {
+            title: 'Keyword Representation in Synergy Overlaps (share)',
+            xaxis: { title: 'Keyword' },
+            yaxis: { title: 'Share', rangemode: 'tozero' }
+        };
+        Plotly.newPlot('synergy-keywords-chart', kwData, kwLayout);
     </script>
 </body>
 </html>
+
+
