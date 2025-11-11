@@ -7,12 +7,8 @@ import os
 import sys
 import json
 import argparse
-try:
-    import yaml  # type: ignore
-    HAS_YAML = True
-except Exception:
-    yaml = None
-    HAS_YAML = False
+yaml = None
+HAS_YAML = False
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 import re
@@ -36,6 +32,12 @@ from archetypes import (
 )
 from simulators import ArchetypeSimulator, HandTester, DefenseSimulator
 from simulators import SynergySimulator, BiasEmotionSimulator
+
+
+def render_markdown_html(md_text: str) -> str:
+    """Render Markdown to HTML using python-markdown with standard extensions."""
+    from markdown import markdown  # type: ignore
+    return markdown(md_text or "", extensions=["extra", "sane_lists", "nl2br"])  # type: ignore
 
 
 def setup_templates():
@@ -66,29 +68,176 @@ def ensure_output_dir() -> Path:
     output_dir = project_root / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
+def read_text_file(path: Path) -> str:
+    try:
+        with open(path, 'r') as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+def load_markdown_rules(md_filename: str) -> dict:
+    """Parse a markdown file structured with top-level headings (## Name) where the block under each heading is the rules markdown.
+    Returns {Name: html} using the same lightweight md_to_html conversion.
+    """
+    project_root = Path(__file__).parent.parent
+    data_path = project_root / "data" / md_filename
+    if not data_path.exists():
+        return {}
+    raw = read_text_file(data_path)
+    if not raw:
+        return {}
+
+    rules_map: dict = {}
+    current_name = None
+    current_lines: list[str] = []
+    for line in raw.splitlines():
+        if line.startswith('## '):
+            # flush previous
+            if current_name is not None:
+                rules_map[current_name] = render_markdown_html("\n".join(current_lines).strip())
+            current_name = line[3:].strip()
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_name is not None:
+        rules_map[current_name] = render_markdown_html("\n".join(current_lines).strip())
+    return rules_map
+
+
+
+def load_bias_markdown_rules() -> dict:
+    """Parse data/bias_rules.md using bold die headers and labeled sections.
+    Expected block format per die:
+      **Name Die**
+      <!-- optional note -->
+      **Psychological:** text...
+      _optional additional notes_
+      [faces...]
+      **Somatic:** text...
+    Returns: { name: { 'psychological': html, 'somatic': html, 'faces': [ints or None] } }
+    """
+    project_root = Path(__file__).parent.parent
+    data_path = project_root / "data" / "bias_rules.md"
+    if not data_path.exists():
+        return {}
+    raw = read_text_file(data_path)
+    if not raw:
+        return {}
+
+    header_re = re.compile(r"^\*\*(.+?)\s+Die\*\*\s*$")
+    label_psych_re = re.compile(r"^\*{0,2}Psychological:\*{0,2}\s*(.*)$", re.IGNORECASE)
+    label_som_re = re.compile(r"^\*{0,2}Somatic:\*{0,2}\s*(.*)$", re.IGNORECASE)
+    faces_re_bracket = re.compile(r"^\[\s*([Xx\d,\s]+)\s*\]\s*$")
+    faces_re_csv = re.compile(r"^(\d|X|x|\s|,)+$")
+
+    def sanitize_name(name_raw: str) -> str:
+        # Drop leading enumeration like "10\. " or "7. "
+        name = re.sub(r"^\s*\d+\s*\\?\.\s*", "", name_raw).strip()
+        return name
+
+    def parse_faces(text: str):
+        text = text.strip()
+        m = faces_re_bracket.match(text)
+        if m:
+            seq = m.group(1)
+        elif faces_re_csv.match(text):
+            seq = text
+        else:
+            return None
+        parts = [p.strip() for p in seq.split(",")]
+        faces = []
+        for p in parts:
+            if p.upper() == "X" or p == "" or p.lower() == "none":
+                faces.append(None)
+            else:
+                try:
+                    faces.append(int(p))
+                except Exception:
+                    return None
+        return faces if len(faces) == 6 else None
+
+    result: dict[str, dict[str, str]] = {}
+    current_name = None
+    psych_lines: list[str] = []
+    som_lines: list[str] = []
+    faces_line: list[int | None] | None = None
+    last_section = None  # 'psych' or 'som'
+
+    def flush():
+        if current_name is None:
+            return
+        result[current_name] = {
+            "psychological": render_markdown_html("\n".join(psych_lines).strip()),
+            "somatic": render_markdown_html("\n".join(som_lines).strip()),
+        }
+        # Faces retained in local scope if needed in future
+
+    for raw_line in raw.splitlines():
+        line = raw_line.rstrip()
+        # Detect new die header
+        hm = header_re.match(line)
+        if hm:
+            # flush previous
+            if current_name is not None:
+                flush()
+            current_name = sanitize_name(hm.group(1))
+            psych_lines = []
+            som_lines = []
+            faces_line = None
+            last_section = None
+            continue
+        if current_name is None:
+            continue
+        # Detect labeled lines
+        pm = label_psych_re.match(line)
+        if pm:
+            last_section = 'psych'
+            content = pm.group(1).strip()
+            if content:
+                psych_lines.append(content)
+            continue
+        sm = label_som_re.match(line)
+        if sm:
+            last_section = 'som'
+            content = sm.group(1).strip()
+            if content:
+                som_lines.append(content)
+            continue
+        # Faces
+        if faces_line is None:
+            parsed = parse_faces(line)
+            if parsed is not None:
+                faces_line = parsed
+                continue
+        # Additional italic notes belong to the last section, if any
+        if last_section and (line.startswith("_") or line.startswith("(") or line.startswith("*")):
+            if last_section == 'psych':
+                psych_lines.append(line)
+            else:
+                som_lines.append(line)
+            continue
+        # Other lines ignored for HTML
+        continue
+
+    # Flush last
+    if current_name is not None:
+        flush()
+    return result
+
 
 
 def save_data(basename: str, data: dict) -> Path:
     output_dir = ensure_output_dir()
-    if HAS_YAML:
-        path = output_dir / f"{basename}.yaml"
-        with open(path, "w") as f:
-            yaml.safe_dump(data, f, sort_keys=False)
-        return path
-    else:
-        path = output_dir / f"{basename}.json"
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-        return path
+    path = output_dir / f"{basename}.json"
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    return path
 
 
 def load_data(basename: str) -> dict:
     output_dir = ensure_output_dir()
-    ypath = output_dir / f"{basename}.yaml"
     jpath = output_dir / f"{basename}.json"
-    if ypath.exists() and HAS_YAML:
-        with open(ypath) as f:
-            return yaml.safe_load(f) or {}
     if jpath.exists():
         with open(jpath) as f:
             return json.load(f)
@@ -100,32 +249,11 @@ def build_card_data_archetypes() -> list:
         TabulaRasa(), Hedonist(), Physiognomist(), Rationalist(), Fatalist(),
         Transcendentalist(), Puritan(), Machiavalian(), Absurdist(), Stoic(), Nihilist()
     ]
-    # Special dice -> rule text mapping
-    DIE_RULE_TEXT = {
-        "Bliss": "On rolling a 6, immediately heal 1.",
-        "Comedown": "On rolling a 6, immediately take 1 damage. You may take forgiveness tokens instead of healing.",
-        "High-Minded": "If a banked insult contains a 6, add one echo die to that insult, as a 6.",
-        "Spite": "On rolling a 6, immediately deal 1 damage to an opponent.",
-        "Inebriation": "On rolling a 6, you may take 1 Regret to give 1 Neurosis to an opponent.",
-        "Grounded": "When banked as part of a one-pair, add one echo die to that insult, as a 1.",
-        "Nostalgia": "When banking, create an echo die that persists to the next roll with the same value.",
-        "Penance": "If this die is banked as a 4+, for this debate, damage from or to you is doubled.",
-        "Acedic": "On a 6: heal 1; if you have 0 Regret, gain 1 Regret.",
-        "Pilfer": "If both Pilfer dice roll 6, at the start of next round steal an opponent's die for that round.",
-        "Catastrophize": "If you roll a 1, you fumble; if you bank a 6, gain fumble-protection.",
-        "Aporic": "If you roll a 1, you fumble; if you bank a 6, gain fumble-protection.",
-        "Ridicule": "On 6: if you have 0 Regret, gain 1; else transfer 1 Regret to opponent.",
-        "Nausea": "On 6: if you have 0 Regret, gain 1; else transfer 1 Regret to opponent.",
-        "Apathetic": "If banked, gain 2 health.",
-        "Abyssal": "After banking an insult, add this die to it copying the insult's highest die value.",
-        "Choleric": "Yellow humor die.",
-        "Melancholic": "Gray humor die.",
-        "Phlegmatic": "Green humor die.",
-        "Sanguine": "Red humor die.",
-    }
 
-    def rules_for_archetype(a) -> str:
-        # Count dice by name, preserving encounter order
+    # Optional: load external markdown rules
+    md_rules = load_markdown_rules("archetypes_rules.md")
+
+    def minimal_rules(a) -> str:
         order = []
         counts = {}
         for d in a.dice:
@@ -133,57 +261,45 @@ def build_card_data_archetypes() -> list:
             counts[n] = counts.get(n, 0) + 1
             if n not in order:
                 order.append(n)
-
-        # Format lines like: "1x Bliss Die:" then its rule; and include Normal Dice without rules text
-        def display_label(name: str, count: int) -> str:
-            # Always use "Die" for singular, "Dice" for plural
-            suffix = "Die" if count == 1 else "Dice"
-            # Normal should always be "Normal Dice"
-            if name == "Normal":
-                return f"{count}x Normal Dice"
-            return f"{count}x {name} {suffix}"
-
         lines = []
         for n in order:
             c = counts[n]
-            # Header line
-            header = display_label(n, c)
-            if n != "Normal":
-                header += ":"
-            lines.append(f"<b>{header}</b>")
-            # Rule line (if any and not Normal)
-            if n != "Normal":
-                rule = DIE_RULE_TEXT.get(n, "")
-                if rule:
-                    lines.append(rule)
-
-        return "<br>".join(lines)
+            if n == "Normal":
+                lines.append(f"**{c}x Normal d6**")
+            else:
+                suffix = "Die" if c == 1 else "Dice"
+                lines.append(f"**{c}x {n} {suffix}**")
+        return render_markdown_html("\n".join(lines))
 
     cards = []
     for a in archs:
-        rules = rules_for_archetype(a)
+        rules = md_rules.get(a.name) or minimal_rules(a)
         cards.append({
             "name": a.name,
             "subtitle": "Archetype",
             "type": "archetype",
             "rules_html": rules,
             "quote": "",
-            "image_src": f"../assets/{asset_filename_from_title(a.name)}"
+            "image_src": f"../assets/{asset_filename_from_title(a.name)}",
         })
     return cards
 
 
 def build_card_data_defense() -> list:
-    from archetypes import DEFENSE_DICE_DEFINITIONS, DEFENSE_DICE_DESCRIPTIONS
+    from archetypes import DEFENSE_DICE_DEFINITIONS
+    # Load bias (defense) markdown; fallback to minimal text
+    bias_md_split = load_bias_markdown_rules()
     cards = []
     for name, faces in DEFENSE_DICE_DEFINITIONS.items():
-        desc = DEFENSE_DICE_DESCRIPTIONS.get(name, {"subtitle": "Defense Die", "psych": "", "som": ""})
-        rules = f"<b>Psychological:</b> {desc['psych']}<br><b>Somatic:</b> {desc['som']}<br><br><small>Faces: {faces}</small>"
+        psych_html = (bias_md_split.get(name, {}) or {}).get("psychological") or f"<small>Faces: {faces}</small>"
+        som_html = (bias_md_split.get(name, {}) or {}).get("somatic") or ""
         cards.append({
             "name": name,
-            "subtitle": desc.get("subtitle", "Defense Die"),
-            "type": "defense",
-            "rules_html": rules,
+            "subtitle": "Bias Die",
+            "type": "bias",
+            "rules_html": psych_html,  # legacy field for compatibility, not used by bias partial
+            "psych_html": psych_html,
+            "som_html": som_html,
             "quote": "",
             "image_src": f"../assets/{slugify(name)}.svg"
         })
@@ -191,32 +307,30 @@ def build_card_data_defense() -> list:
 
 
 def build_card_data_emotions() -> list:
-    # Build printable cards for emotions from markdown
+    # Build printable cards for emotions from markdown; fallback to compiled definitions if missing
     from emotions import EMOTION_DEFINITIONS
-
-    def md_to_html(md: str) -> str:
-        # Lightweight markdown to HTML for card bodies
-        html = md.strip()
-        # Bold **x**
-        html = html.replace('**', '<b>').replace('<b><b>', '</b>').replace('</b><b>', '</b><b>')
-        # Italic _x_
-        # naive: replace underscores around words with <i>
-        import re
-        html = re.sub(r"_(.*?)_", r"<i>\1</i>", html)
-        # Newlines to <br>
-        html = html.replace("\r\n", "\n").replace("\n\n", "\n\n").replace("\n", "<br>")
-        return html
-
+    md_map = load_markdown_rules("emotions_rules.md")
     cards = []
-    for e in EMOTION_DEFINITIONS:
-        cards.append({
-            "name": e["name"],
-            "subtitle": "Emotion",
-            "type": "emotion",
-            "rules_html": md_to_html(e["markdown"]),
-            "quote": "",
-            "image_src": f"../assets/{slugify(e['name'])}.svg",
-        })
+    if md_map:
+        for name, html in md_map.items():
+            cards.append({
+                "name": name,
+                "subtitle": "Emotion",
+                "type": "emotion",
+                "rules_html": html,
+                "quote": "",
+                "image_src": f"../assets/{slugify(name)}.svg",
+            })
+    else:
+        for e in EMOTION_DEFINITIONS:
+            cards.append({
+                "name": e["name"],
+                "subtitle": "Emotion",
+                "type": "emotion",
+                "rules_html": render_markdown_html(e["markdown"]),
+                "quote": "",
+                "image_src": f"../assets/{slugify(e['name'])}.svg",
+            })
     return cards
 
 
@@ -463,9 +577,9 @@ def generate_reports(archetype_results, hand_test_results, performance_ranking, 
     with open(output_dir / "hand_testing.html", "w") as f:
         f.write(hand_html)
 
-    # Defense testing report (only if results available)
+    # Bias (formerly defense) testing report (only if results available)
     if isinstance(defense_results, dict) and defense_results and all(isinstance(v, dict) for v in defense_results.values()):
-        defense_template = env.get_template("defense_testing.j2")
+        defense_template = env.get_template("bias_testing.j2")
         d_names = list(defense_results.keys())
         d_names.sort(key=lambda n: defense_results[n]["psychological"].get("triggers_per_game", 0), reverse=True)
         psych_win = [defense_results[n]["psychological"]["win_rate"] for n in d_names]
@@ -487,7 +601,7 @@ def generate_reports(archetype_results, hand_test_results, performance_ranking, 
             triggers_per_round_psych=trig_round_psych,
             triggers_per_round_som=trig_round_som
         )
-        with open(output_dir / "defense_testing.html", "w") as f:
+        with open(output_dir / "bias_testing.html", "w") as f:
             f.write(defense_html)
 
     # Ensure assets dir exists for images (relative path used by HTML)
@@ -502,8 +616,8 @@ def generate_reports(archetype_results, hand_test_results, performance_ranking, 
 
     with open(output_dir / "archetypes_print.html", "w") as f:
         f.write(cards_template.render(title="Archetype Cards", cards=arch_cards))
-    with open(output_dir / "defense_print.html", "w") as f:
-        f.write(cards_template.render(title="Defense Dice Cards", cards=def_cards))
+    with open(output_dir / "bias_print.html", "w") as f:
+        f.write(cards_template.render(title="Bias Dice Cards", cards=def_cards))
     with open(output_dir / "emotions_print.html", "w") as f:
         f.write(cards_template.render(title="Emotion Cards", cards=emo_cards))
 
@@ -550,9 +664,9 @@ def generate_reports(archetype_results, hand_test_results, performance_ranking, 
     print("📊 Reports generated:")
     print("  - output/archetypes_testing.html")
     print("  - output/hand_testing.html")
-    print("  - output/defense_testing.html")
+    print("  - output/bias_testing.html")
     print("  - output/archetypes_print.html")
-    print("  - output/defense_print.html")
+    print("  - output/bias_print.html")
     print("  - output/emotions_print.html")
 
 

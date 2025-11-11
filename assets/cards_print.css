@@ -22,7 +22,7 @@ body {
 
 h2 {
   padding: 0;
-  margin: .3em;
+  margin: .3em 0em;
   font-size: 1em;
 }
 
@@ -47,7 +47,6 @@ h2 {
 }
 
 .card-header {
-  position: absolute;
   width: 5.9cm;
   z-index: 3;
 }
@@ -86,25 +85,39 @@ h2 {
 }
 
 .card-image-wrap {
-  position: absolute;
-  top: .5cm;
+  margin-top: -.3cm;
   left: 0;
   right: 0;
   overflow: visible;
   z-index: 1;
 }
+.bias-card .card-image-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 2.5cm;
+}
+.card-image-wrap.dice { margin-top: 0cm; }
+.archetype-card .card-image-wrap { margin-top: -0.5cm; }
 
 .card-image {
   width: 100%;
   height: auto;
-  min-height: 5cm;
+  min-height: 0;
+  max-height: 100%;
   object-fit: contain;
   object-position: center;
+  opacity: 0.95;
+
+  align-self: center;
+}
+.archetype-card .card-image {
+  min-height: 5cm;
+  max-height: 7cm;
 }
 
 .card-body {
-  position: absolute;
-  bottom: 0;
   left: 0;
   right: 0;
   z-index: 2;
@@ -113,17 +126,33 @@ h2 {
   padding-top: 0;
   display: flex;
   flex-direction: column;
-  white-space: pre-line;
   background: none;
   color: #111;
 }
+.archetype-card .card-body {
+  position: absolute;
+}
 
-.card-body .hilite {
+.anchor-bottom {
+  position: absolute;
+  bottom: 0; top: auto;
+}
+.anchor-top {
+  top: 4cm; bottom: auto;
+}
+
+.anchor-psych-top { top: 1.9cm; bottom: auto; }
+.bias-card .card-body.inverted {
+  transform: rotate(180deg);
+  transform-origin: center;
+}
+
+.card-body .hilite, .card-body.hilite {
   background: rgba(255,255,255,0.85);
   color: #111;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
-  padding: 0 .2em;
+  padding: .2em .5em;
 }
 
 .card-body p, .card-body i {

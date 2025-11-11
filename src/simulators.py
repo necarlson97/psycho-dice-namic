@@ -559,6 +559,61 @@ class SynergySimulator:
             results[arch.name] = (total_synergies / num_games) if num_games else 0.0
         return results
 
+    def keyword_frequencies(self, archetypes: List[Archetype], num_games: int = 100) -> Dict[str, float]:
+        """Estimate distribution of which keywords drive overlaps across sampled selections."""
+        from emotions import EMOTION_DEFINITIONS
+        from archetypes import DEFENSE_DICE_DESCRIPTIONS, DEFENSE_DICE_DEFINITIONS
+        freq: Dict[str, int] = {k: 0 for k in self.KEYWORDS}
+        total_overlaps = 0
+        defense_items = []
+        for name, desc in DEFENSE_DICE_DESCRIPTIONS.items():
+            text = (desc.get('psych','') + ' ' + desc.get('som',''))
+            faces = DEFENSE_DICE_DEFINITIONS.get(name, [])
+            nums = [v for v in faces if isinstance(v, int)]
+            if nums:
+                odd_count = sum(1 for v in nums if v % 2 == 1)
+                even_count = sum(1 for v in nums if v % 2 == 0)
+                if even_count <= 1:
+                    text += ' odd'
+                if odd_count <= 1:
+                    text += ' even'
+            defense_items.append((name, text))
+        for arch in archetypes:
+            for _ in range(num_games):
+                current_keywords = set(self.archetype_keywords(arch))
+                chosen_emotion_keywords = []
+                chosen_die_keywords = []
+                for _p in range(3):
+                    e_choices = random.sample(EMOTION_DEFINITIONS, k=min(3, len(EMOTION_DEFINITIONS)))
+                    d_choices = random.sample(defense_items, k=min(3, len(defense_items)))
+                    def overlap_score(tags: set) -> int:
+                        return len(tags & current_keywords)
+                    # select best emotion
+                    e_with_kws = [(e, self.extract_keywords(e['markdown'])) for e in e_choices]
+                    best_e, best_e_kws = max(e_with_kws, key=lambda x: (overlap_score(x[1]), len(x[1])))
+                    if overlap_score(best_e_kws) <= 0:
+                        best_e, best_e_kws = max(e_with_kws, key=lambda x: len(x[1]))
+                    chosen_emotion_keywords.append(best_e_kws)
+                    current_keywords |= best_e_kws
+                    # select best die
+                    d_with_kws = [((name, txt), self.extract_keywords(txt)) for name, txt in d_choices]
+                    best_d, best_d_kws = max(d_with_kws, key=lambda x: (overlap_score(x[1]), len(x[1])))
+                    if overlap_score(best_d_kws) <= 0:
+                        best_d, best_d_kws = max(d_with_kws, key=lambda x: len(x[1]))
+                    chosen_die_keywords.append(best_d_kws)
+                    current_keywords |= best_d_kws
+                # accumulate overlaps
+                for ek in chosen_emotion_keywords:
+                    for dk in chosen_die_keywords:
+                        inter = ek & dk
+                        if inter:
+                            total_overlaps += 1
+                            for kw in inter:
+                                freq[kw] = freq.get(kw, 0) + 1
+        if total_overlaps == 0:
+            return {k: 0.0 for k in freq}
+        return {k: (v / total_overlaps) for k, v in freq.items()}
+
 class BiasEmotionSimulator:
     """Simulates archetypes augmented with psychological and somatic bias dice and emotions.
     - For each run: for a given archetype, select 2 psych defense dice (replace normals), 2 somatic defense dice (bench), and 2 emotions.

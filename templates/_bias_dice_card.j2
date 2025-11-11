@@ -1,0 +1,14 @@
+{# Psychological rules above image #}
+<div class="card-body hilite" data-min-font="8">
+  <h2>Psychological</h2>
+  {{ c.psych_html | safe }}
+</div>
+<div class="card-image-wrap dice"><img src="{{ c.image_src }}" class="card-image"></div>
+{# Somatic rules below image, rotated 180 degrees for flipped reading #}
+<div class="card-body inverted hilite" data-min-font="8">
+  <h2>Somatic</h2>
+  {{ c.som_html | safe }}
+</div>
+
+
+

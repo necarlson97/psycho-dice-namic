@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Psycho-Dice-Namic: Bias Dice Testing</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f7f7fb; color: #222; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 16px; box-sizing: border-box; }
+    .chart { background: white; border-radius: 10px; padding: 20px; margin: 16px 0; color: #222; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .chart > div { width: 100% !important; height: 480px; }
+    h1 { text-align: center; }
+    .theme-toggle { position: fixed; top: 10px; right: 10px; z-index: 999; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+    @media print { .theme-toggle { display: none; } }
+    body.dark { background: #0b0e14; color: #eaeaea; }
+    body.dark .chart { background: rgba(0,0,0,0.8); color: #eaeaea; box-shadow: none; }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">🌙</button>
+  <div class="container">
+    <h1>Bias Dice Analysis</h1>
+
+    <div class="chart"><div id="psych-chart"></div></div>
+    <div class="chart"><div id="som-chart"></div></div>
+    <div class="chart"><div id="trig-game-chart"></div></div>
+    <div class="chart"><div id="trig-round-chart"></div></div>
+  </div>
+
+  <script>
+    (function(){
+      var key = 'theme';
+      var saved = localStorage.getItem(key);
+      var hour = new Date().getHours();
+      var isNight = (hour >= 21 || hour < 5);
+      if (saved === 'dark' || (!saved && (isNight || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)))) {
+        document.body.classList.add('dark');
+      }
+      document.getElementById('themeToggle').addEventListener('click', function(){
+        var d = document.body.classList.toggle('dark');
+        localStorage.setItem(key, d ? 'dark' : 'light');
+      });
+    })();
+  </script>
+  <script>
+    var names = {{ names|tojson }};
+
+    // Psychological Win+Tie
+    var psychData = [{ x: names, y: {{ psych_win|tojson }}, type: 'bar', name: 'Win', marker: {color:'#22c55e'} },
+                     { x: names, y: {{ psych_tie|tojson }}, type: 'bar', name: 'Tie', marker: {color:'#f59e0b'} }];
+    var pAll = [].concat({{ psych_win|tojson }}, {{ psych_tie|tojson }});
+    var pmin = Math.min.apply(null, pAll); var pmax = Math.max.apply(null, pAll);
+    var pLayout = { title: 'Psychological Mode (Win+Tie)', barmode: 'stack', yaxis: {range:[Math.max(0, Math.min(0.3, pmin-0.05)), Math.min(1, Math.max(0.7, pmax+0.05))]}, shapes:[{type:'line', x0:-0.5, x1:names.length-0.5, y0:0.5, y1:0.5, line:{color:'#64748b', dash:'dot'}}] };
+    Plotly.newPlot('psych-chart', psychData, pLayout);
+
+    // Somatic Win+Tie
+    var somData = [{ x: names, y: {{ som_win|tojson }}, type: 'bar', name: 'Win', marker: {color:'#06b6d4'} },
+                   { x: names, y: {{ som_tie|tojson }}, type: 'bar', name: 'Tie', marker: {color:'#f59e0b'} }];
+    var sAll = [].concat({{ som_win|tojson }}, {{ som_tie|tojson }});
+    var smin = Math.min.apply(null, sAll); var smax = Math.max.apply(null, sAll);
+    var sLayout = { title: 'Somatic Mode (Win+Tie)', barmode: 'stack', yaxis: {range:[Math.max(0, Math.min(0.3, smin-0.05)), Math.min(1, Math.max(0.7, smax+0.05))]}, shapes:[{type:'line', x0:-0.5, x1:names.length-0.5, y0:0.5, y1:0.5, line:{color:'#64748b', dash:'dot'}}] };
+    Plotly.newPlot('som-chart', somData, sLayout);
+
+    // Triggers per game (stacked Psych vs Somatic)
+    var trigGameData = [
+      { x: names, y: {{ triggers_per_game_psych|tojson }}, type: 'bar', name: 'Psychological', marker: {color:'#8b5cf6'} },
+      { x: names, y: {{ triggers_per_game_som|tojson }}, type: 'bar', name: 'Somatic', marker: {color:'#10b981'} }
+    ];
+    var tgLayout = { title: 'Average Triggers per Game (stacked)', barmode: 'stack', yaxis:{title:'Triggers'} };
+    Plotly.newPlot('trig-game-chart', trigGameData, tgLayout);
+
+    // Triggers per round (stacked Psych vs Somatic)
+    var trigRoundData = [
+      { x: names, y: {{ triggers_per_round_psych|tojson }}, type: 'bar', name: 'Psychological', marker: {color:'#8b5cf6'} },
+      { x: names, y: {{ triggers_per_round_som|tojson }}, type: 'bar', name: 'Somatic', marker: {color:'#10b981'} }
+    ];
+    var trLayout = { title: 'Average Triggers per Round (stacked)', barmode: 'stack', yaxis:{title:'Triggers'} };
+    Plotly.newPlot('trig-round-chart', trigRoundData, trLayout);
+  </script>
+</body>
+</html>
+
+
+

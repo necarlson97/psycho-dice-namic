@@ -10,21 +10,21 @@
   <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">🌙</button>
   <div class="cards-container">
     {% for c in cards %}
-      <div class="card">
+      <div class="card {{ c.type }}-card">
         <div class="card-header">
           <div class="card-title">
             <span class="card-name">{{ c.name }}</span>
           </div>
           {% if c.subtitle %}<i class="card-category">{{ c.subtitle }}</i>{% endif %}
         </div>
-        {% if c.type == 'defense' %}
-          <div class="spacer"></div>
-          <div class="card-body"><span class="hilite">{{ c.rules_html | safe }}</span></div>
-          <div class="card-image-wrap"><img src="{{ c.image_src }}" class="card-image"></div>
+        {% if c.type == 'archetype' %}
+          {% include "_archetype_card.j2" %}
+        {% elif c.type == 'bias' %}
+          {% include "_bias_dice_card.j2" %}
+        {% elif c.type == 'emotion' %}
+          {% include "_emotion_card.j2" %}
         {% else %}
-          <div class="spacer"></div>
-          <div class="card-body"><span class="hilite">{{ c.rules_html | safe }}</span></div>
-          <div class="card-image-wrap"><img src="{{ c.image_src }}" class="card-image"></div>
+          {% include "_archetype_card.j2" %}
         {% endif %}
         {% if c.quote %}<div class="card-footer">{{ c.quote }}</div>{% endif %}
       </div>
@@ -65,9 +65,11 @@
           size -= 0.5;
           el.style.fontSize = size + 'px';
         }
+        console.log("Shrunk title to " + el.style.fontSize);
       }
       function fitAll() {
         document.querySelectorAll('.card-name').forEach(fitTitle);
+        document.querySelectorAll('.card-body').forEach(fitRules);
       }
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', fitAll);
@@ -78,6 +80,20 @@
       window.addEventListener('resize', fitAll);
       window.matchMedia('print').addListener(fitAll);
     })();
+    // Resize rules text to fit within the card bounds
+    function fitRules(panel) {
+      try {
+        if (!panel) return;
+        var text = panel.textContent || '';
+        if (text.length > 500) {
+          panel.style.fontSize = '9px';
+          panel.style.lineHeight = '1.1';
+        } else {
+          panel.style.fontSize = '';
+          panel.style.lineHeight = '';
+        }
+      } catch (e) { /* no-op */ }
+    }
   </script>
 </body>
 </html>
